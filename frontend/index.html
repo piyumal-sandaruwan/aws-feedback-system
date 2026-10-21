@@ -144,63 +144,136 @@
   </footer>
 
   <script>
-    // REPLACE URL
-    const FEEDBACK_API_URL = 'https://mpsx121rhf.execute-api.us-east-1.amazonaws.com/prod/submit';
+  const FEEDBACK_API_URL =
+    'https://mpsx121rhf.execute-api.us-east-1.amazonaws.com/prod/submit';
 
-    document.getElementById('feedbackForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const name = document.getElementById('name').value;
-      const email = document.getElementById('email').value;
-      const message = document.getElementById('message').value;
-      const file = document.getElementById('file').files[0];
+  const form = document.getElementById('feedbackForm');
+  const submitButton = form.querySelector('button[type="submit"]');
+  const fileInput = document.getElementById('file');
 
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+
+    if (submitButton.disabled) return;
+
+    const name = document.getElementById('name').value.trim();
+    const email = document.getElementById('email').value.trim();
+    const message = document.getElementById('message').value.trim();
+    const file = fileInput.files[0];
+
+    if (!name || !email || !message) {
+      showModal('Please complete all required fields.');
+      return;
+    }
+
+    // Basic client-side PDF checks.
+    if (file) {
+      if (file.type !== 'application/pdf') {
+        showModal('Please select a PDF file.');
+        return;
+      }
+
+      // Keep under 4 MB to limit Base64 request size.
+      if (file.size > 4 * 1024 * 1024) {
+        showModal('PDF must be smaller than 4 MB.');
+        return;
+      }
+    }
+
+    submitButton.disabled = true;
+    submitButton.textContent = 'Submitting...';
+
+    try {
       let file_base64 = null;
+
       if (file) {
-        const reader = new FileReader();
-        reader.onload = async () => {
-          file_base64 = reader.result.split(',')[1];
-          await submitFeedback(name, email, message, file_base64);
-        };
-        reader.readAsDataURL(file);
-      } else {
-        await submitFeedback(name, email, message, null);
+        file_base64 = await readFileAsBase64(file);
       }
-    });
 
-    async function submitFeedback(name, email, message, file_base64) {
-      try {
-        const res = await fetch(FEEDBACK_API_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, email, message, file_base64 })
-        });
-        const data = await res.json();
-        showModal(data.message || 'Feedback submitted successfully!');
-      } catch (err) {
-        showModal('Submission failed. Please try again later.');
+      const response = await fetch(FEEDBACK_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name,
+          email,
+          message,
+          file_base64
+        })
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      // Do not report success for HTTP errors.
+      if (!response.ok) {
+        throw new Error(
+          data.message || `Request failed with status ${response.status}`
+        );
       }
+
+      showModal(data.message || 'Feedback submitted successfully!');
+    } catch (error) {
+      console.error('Feedback submission error:', error);
+
+      showModal(
+        error.message?.startsWith('Request failed')
+          ? error.message
+          : 'Submission failed. Check the browser console and API configuration.'
+      );
+    } finally {
+      submitButton.disabled = false;
+      submitButton.textContent = 'Submit';
     }
+  });
 
-    function showModal(message) {
-      const modal = document.getElementById('myModal');
-      const modalMessage = document.getElementById('modalMessage');
-      const modalOkayButton = document.getElementById('modalOkayButton');
+  function readFileAsBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
 
-      modalMessage.innerText = message;
-      modal.style.display = 'block';
+      reader.onload = () => {
+        const result = reader.result;
 
-      modalOkayButton.onclick = function() {
-        modal.style.display = 'none';
-        location.reload();
-      }
-
-      window.onclick = function(event) {
-        if (event.target == modal) {
-          modal.style.display = 'none';
-          location.reload();
+        if (typeof result !== 'string' || !result.includes(',')) {
+          reject(new Error('Could not read the selected PDF.'));
+          return;
         }
-      }
+
+        resolve(result.split(',')[1]);
+      };
+
+      reader.onerror = () => {
+        reject(new Error('Failed to read the selected PDF.'));
+      };
+
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function showModal(message) {
+    document.getElementById('modalMessage').innerText = message;
+    document.getElementById('myModal').style.display = 'block';
+  }
+
+  function closeModal() {
+    document.getElementById('myModal').style.display = 'none';
+  }
+
+  document.getElementById('modalOkayButton').addEventListener(
+    'click',
+    closeModal
+  );
+
+  document.querySelector('.close').addEventListener(
+    'click',
+    closeModal
+  );
+
+  window.addEventListener('click', (event) => {
+    if (event.target === document.getElementById('myModal')) {
+      closeModal();
     }
-  </script>
+  });
+</script>
 </body>
 </html>
